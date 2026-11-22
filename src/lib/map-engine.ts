@@ -1,6 +1,7 @@
 import Graph from 'graphology';
 import Sigma from 'sigma';
 import { createNodeImageProgram } from '@sigma/node-image';
+import { constellationSkeleton } from './core/skeleton.ts';
 import type { Constellation } from './core/types.ts';
 import type { Store } from './data.ts';
 
@@ -26,6 +27,9 @@ export function hsl(h: number, s: number, l: number, a = 1): string {
 const FADED_NODE = '#262c4a';
 /** Por debajo de este ratio de cámara (más zoom) se muestran las portadas */
 const IMAGE_RATIO = 0.22;
+/** Conexiones que se muestran al seleccionar / pasar el ratón */
+const SELECT_NEIGHBORS = 8;
+const HOVER_NEIGHBORS = 5;
 
 /**
  * Envuelve Sigma: grafo fijo con todos los nodos; los filtros solo cambian
@@ -44,6 +48,8 @@ export class MapEngine {
   private focusSet: Set<number> | null = null;
   private dimHidden = false;
   private neighborSet = new Set<number>();
+  private hoverSet = new Set<number>();
+  private skeleton = new Set<string>();
   private tween = 0;
   private imageMode = false;
   private imageTimer: ReturnType<typeof setTimeout> | undefined;
@@ -99,12 +105,14 @@ export class MapEngine {
     this.sigma.on('clickStage', () => cb.click(null));
     this.sigma.on('enterNode', ({ node }) => {
       this.hovered = Number(node);
+      this.updateHover();
       container.style.cursor = 'pointer';
       cb.hover(this.hovered);
       this.sigma.refresh({ skipIndexation: true });
     });
     this.sigma.on('leaveNode', () => {
       this.hovered = null;
+      this.updateHover();
       container.style.cursor = '';
       cb.hover(null);
       this.sigma.refresh({ skipIndexation: true });
@@ -125,13 +133,29 @@ export class MapEngine {
     new ResizeObserver(() => this.drawOverlay()).observe(container);
   }
 
+  /** Conexiones más fuertes de un nodo entre las series visibles */
+  private topNeighbors(c: number, k: number) {
+    const out: number[] = [];
+    for (const [j] of this.store.adj[c]) {
+      if (!this.visible[j]) continue;
+      out.push(j);
+      if (out.length === k) break;
+    }
+    return out;
+  }
+
   /** Vecinos del nodo seleccionado (el hover NO atenúa nada, para evitar parpadeos) */
   private updateNeighbors() {
     this.neighborSet.clear();
     const c = this.selected;
     if (c == null) return;
     this.neighborSet.add(c);
-    for (const [j] of this.store.adj[c]) if (this.visible[j]) this.neighborSet.add(j);
+    for (const j of this.topNeighbors(c, SELECT_NEIGHBORS)) this.neighborSet.add(j);
+  }
+
+  private updateHover() {
+    this.hoverSet.clear();
+    if (this.hovered != null) for (const j of this.topNeighbors(this.hovered, HOVER_NEIGHBORS)) this.hoverSet.add(j);
   }
 
   /** ¿Está el nodo dentro de la pantalla (con margen)? */
@@ -197,24 +221,23 @@ export class MapEngine {
     const [a, b] = this.graph.extremities(edge).map(Number);
     if (!this.visible[a] || !this.visible[b]) return { ...data, hidden: true };
     const sel = this.selected;
-    if (sel != null) {
-      if (a === sel || b === sel) {
-        const other = a === sel ? b : a;
-        return { ...data, color: this.styles[other]?.color ?? '#fff', size: 0.8 + data.weight * 6, zIndex: 2 };
-      }
-      if (a !== this.hovered && b !== this.hovered) return { ...data, hidden: true };
+    if (sel != null && ((a === sel && this.neighborSet.has(b)) || (b === sel && this.neighborSet.has(a)))) {
+      const other = a === sel ? b : a;
+      return { ...data, color: this.styles[other]?.color ?? '#fff', size: 1 + data.weight * 5, zIndex: 2 };
     }
     const h = this.hovered;
-    if (h != null && (a === h || b === h)) {
-      // hover: solo se resaltan sus conexiones, sin apagar el resto
-      return { ...data, color: 'rgba(255,255,255,0.55)', size: 0.6 + data.weight * 4, zIndex: 3 };
+    if (h != null && ((a === h && this.hoverSet.has(b)) || (b === h && this.hoverSet.has(a)))) {
+      // hover: solo sus conexiones más fuertes, sin apagar el resto
+      return { ...data, color: 'rgba(255,255,255,0.6)', size: 0.8 + data.weight * 4, zIndex: 3 };
     }
+    if (sel != null) return { ...data, hidden: true };
     if (this.focusSet && !(this.focusSet.has(a) && this.focusSet.has(b))) return { ...data, hidden: true };
+    if (!this.skeleton.has(edge)) return { ...data, hidden: true };
     const sa = this.styles[a];
     const sb = this.styles[b];
-    if (sa?.faded || sb?.faded) return { ...data, hidden: true };
+    if (sa?.faded && sb?.faded) return { ...data, hidden: true };
     const color = this.edgeColor(a, b);
-    return color ? { ...data, color } : { ...data, hidden: true };
+    return color ? { ...data, color, size: 0.6 + data.weight * 2.5 } : { ...data, hidden: true };
   }
 
   private edgeColors = new Map<number, string>();
@@ -224,7 +247,7 @@ export class MapEngine {
     let c = this.edgeColors.get(ca);
     if (!c) {
       const k = this.constellations.find((x) => x.id === ca);
-      c = k ? hsl(k.hue, 75, 60, 0.09) : 'rgba(255,255,255,0.05)';
+      c = k ? hsl(k.hue, 55, 78, 0.38) : 'rgba(255,255,255,0.2)';
       this.edgeColors.set(ca, c);
     }
     return c;
@@ -257,6 +280,13 @@ export class MapEngine {
   setConstellations(list: Constellation[], cluster: Int32Array) {
     this.constellations = list;
     this.constOf = cluster;
+    // esqueleto de cada constelación: lo único que se dibuja por defecto
+    this.skeleton.clear();
+    const edges = this.store.ds.edges;
+    for (const k of constellationSkeleton(this.store.nodes.length, edges, cluster)) {
+      const key = this.graph.edge(edges[k][0], edges[k][1]);
+      if (key) this.skeleton.add(key);
+    }
     this.edgeColors.clear();
     this.sigma.refresh({ skipIndexation: true });
   }

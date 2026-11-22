@@ -235,7 +235,7 @@ class AppState {
     const focusC = this.focusConstellation;
     return s.nodes.map((n, i) => {
       const t = (logs[i] - lo) / (hi - lo || 1);
-      let size = 1.6 + 7.5 * t * t;
+      let size = 1.4 + 5.5 * t * t;
       let color: string;
       const st = user?.byNode.get(i);
       let emphasis = false;

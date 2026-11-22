@@ -15,6 +15,7 @@ import {
   forceY,
   type SimulationNodeDatum,
 } from 'd3-force';
+import { constellationSkeleton } from './skeleton.ts';
 
 export interface LayoutInput {
   n: number;
@@ -205,25 +206,31 @@ export function runLayout(
     const d = Math.sqrt(rng()) * m.r;
     stars.push({ i, c: cluster[i], r: 2.5 + (input.mass?.[i] ?? 0), x: m.x! + Math.cos(a) * d, y: m.y! + Math.sin(a) * d });
   }
-  const intra = edges.filter(([a, b]) => cluster[a] === cluster[b]);
-  const meanW = intra.reduce((s, e) => s + e[2], 0) / (intra.length || 1);
+  // Las aristas del esqueleto (árbol de máximo peso) mandan; el resto de
+  // recomendaciones internas solo empuja suavemente. Así la constelación queda
+  // con forma de «figura» y no de bola enmarañada.
+  const skel = constellationSkeleton(n, edges, cluster);
+  const links: { source: number; target: number; w: number; sk: boolean }[] = [];
+  edges.forEach(([a, b, w], k) => {
+    if (cluster[a] === cluster[b]) links.push({ source: a, target: b, w, sk: skel.has(k) });
+  });
   const count = new Int32Array(n);
-  for (const [a, b] of intra) count[a]++, count[b]++;
+  for (const l of links) if (l.sk) count[l.source]++, count[l.target]++;
   const sim = forceSimulation(stars)
     .force(
       'link',
-      forceLink<Star, any>(intra.map(([a, b, w]) => ({ source: a, target: b, w })))
+      forceLink<Star, any>(links)
         .id((d) => d.i)
-        .distance(SP * 1.6)
+        .distance((l) => (l.sk ? SP * 1.8 : SP * 3))
         .strength((l) => {
-          const base = 1 / Math.min(count[(l.source as Star).i], count[(l.target as Star).i]);
-          return base * Math.max(0.3, Math.min(2, l.w / meanW));
+          if (!l.sk) return 0.015;
+          return 0.9 / Math.max(1, Math.min(count[(l.source as Star).i], count[(l.target as Star).i]));
         }),
     )
     .force('charge', forceManyBody<Star>().strength(-14).distanceMax(SP * 12))
     .force('collide', forceCollide<Star>((d) => d.r + 1.5))
-    .force('x', forceX<Star>((d) => meta[d.c].x!).strength(0.09))
-    .force('y', forceY<Star>((d) => meta[d.c].y!).strength(0.09))
+    .force('x', forceX<Star>((d) => meta[d.c].x!).strength(0.06))
+    .force('y', forceY<Star>((d) => meta[d.c].y!).strength(0.06))
     .alphaDecay(1 - Math.pow(0.001, 1 / iterations))
     .stop();
 
