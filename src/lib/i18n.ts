@@ -290,6 +290,8 @@ const TAGS: Record<string, string> = {
   'Cute Boys Doing Cute Things': 'Chicos monos',
   'Mahou Shoujo': 'Mahou shoujo',
   'Space Opera': 'Ópera espacial',
+  'Male Harem': 'Harem inverso',
+  'Reverse Isekai': 'Isekai inverso',
 };
 
 export const tr = {

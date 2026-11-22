@@ -2,6 +2,7 @@ import Graph from 'graphology';
 import Sigma from 'sigma';
 import { createNodeImageProgram } from '@sigma/node-image';
 import { constellationSkeleton } from './core/skeleton.ts';
+import { shortTitle } from './core/constellations.ts';
 import type { Constellation } from './core/types.ts';
 import type { Store } from './data.ts';
 
@@ -403,7 +404,7 @@ export class MapEngine {
         if (placed.some((b) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) continue;
         placed.push(box);
         html.push(
-          `<button class="clabel" data-id="${c.id}" style="left:${p.x}px;top:${p.y - r * 0.55}px;font-size:${fs}px;opacity:${op};color:${hsl(c.hue, 85, 80)}">${escapeHtml(c.name)}<small>${c.size} series</small></button>`,
+          `<button class="clabel" data-id="${c.id}" style="left:${p.x}px;top:${p.y - r * 0.55}px;font-size:${fs}px;opacity:${op};color:${hsl(c.hue, 85, 80)}">${escapeHtml(c.name)}<small>★ ${escapeHtml(shortTitle(c.hint))} · ${c.size}</small></button>`,
         );
       }
     }

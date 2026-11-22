@@ -73,7 +73,7 @@ class AppState {
       this.visible = new Uint8Array(store.nodes.length).fill(1);
       this.fullCluster = Int32Array.from(store.nodes.map((n) => n.c));
       const pos = Float64Array.from(store.nodes.flatMap((n) => [n.x, n.y]));
-      this.fullConstellations = describeConstellations(store.nodes, this.fullCluster, pos, store.ds.tags, tr.tag);
+      this.fullConstellations = describeConstellations(store.nodes, this.fullCluster, pos, store.ds.tags, tr.tag, tr.genre);
       this.cluster = this.fullCluster;
       this.constellations = this.fullConstellations;
       this.store = store;
@@ -194,7 +194,7 @@ class AppState {
         const cl = new Int32Array(s.nodes.length).fill(-1);
         idx.forEach((g, k) => (cl[g] = msg.cluster[k]));
         const sub = idx.map((g) => s.nodes[g]);
-        const cons = describeConstellations(sub, msg.cluster, msg.pos, s.ds.tags, tr.tag);
+        const cons = describeConstellations(sub, msg.cluster, msg.pos, s.ds.tags, tr.tag, tr.genre);
         this.cluster = cl;
         this.constellations = cons;
         this.engine?.setPositions(full);
