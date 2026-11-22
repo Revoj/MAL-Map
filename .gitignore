@@ -1,14 +1,9 @@
-anime-offline-database.json
 node_modules
+dist
 .DS_Store
-
-*.js
-
-min_metadata.json
-edges.json
-edges.txt
-partitions.txt
-clusters.json
-layout.json
-
-build/
+*.log
+.env
+.env.local
+# caché del pipeline (se regenera con npm run data:fetch)
+data/raw
+.claude/

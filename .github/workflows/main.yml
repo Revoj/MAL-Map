@@ -1,46 +1,44 @@
-name: Build and GH-Page Deploy
+name: Build and GH-Pages Deploy
+
+# Publica la versión estática en GitHub Pages. En Pages no hay servidor, así que
+# para conectar listas de MAL por nombre de usuario define la variable de
+# repositorio MAL_PROXY con la URL de un proxy (p. ej. el despliegue en Vercel
+# de este mismo repo: https://tu-app.vercel.app/api/mal). Sin ella siguen
+# funcionando AniList y la importación del XML de MAL.
 
 on:
   push:
-    branches:
-      - master
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./svelte
-
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.9"
-
-      - name: Install Python Dependencies
-        run: pip install -r requirements.txt
-        working-directory: ./data-collection
-
-      - name: Run data pipeline
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
         env:
-          MAL_KEY: ${{ secrets.MAL_KEY }}
-        run: |
-          npm ci
-          npm run layout
-        working-directory: ./data-collection
-
-      - name: Install
-        run: npm ci
-        working-directory: ./svelte
-
-      - name: Build
-        run: |
-          npm run build
-        working-directory: ./svelte
-
-      - name: Deploy to GH Page
-        uses: JamesIves/github-pages-deploy-action@4.1.1
+          VITE_MAL_PROXY: ${{ vars.MAL_PROXY }}
+      - uses: actions/upload-pages-artifact@v3
         with:
-          branch: gh-pages
-          folder: svelte/public
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
