@@ -72,29 +72,81 @@ export function detectClusters(
   const cluster = new Int32Array(n);
   for (let i = 0; i < n; i++) cluster[i] = comm[i] ?? i;
 
-  // Constelaciones mínimas: tamaño relativo al grafo (≥ 4 nodos, ~0.4 %)
-  const minSize = Math.max(4, Math.round(n * 0.004));
-  for (let pass = 0; pass < 3; pass++) {
+  // Constelaciones demasiado grandes: se dividen volviendo a aplicar Louvain
+  // solo dentro de ellas (con resolución creciente) hasta un tamaño legible.
+  const maxSize = Math.max(60, Math.round(n * 0.04));
+  let nextId = n + 1;
+  for (let round = 0; round < 4; round++) {
+    const members = new Map<number, number[]>();
+    for (let i = 0; i < n; i++) {
+      if (!members.has(cluster[i])) members.set(cluster[i], []);
+      members.get(cluster[i])!.push(i);
+    }
+    let split = false;
+    for (const idx of members.values()) {
+      if (idx.length <= maxSize) continue;
+      const local = new Map(idx.map((g, k) => [g, k]));
+      const sub = buildGraph(
+        idx.length,
+        edges.filter(([a, b]) => local.has(a) && local.has(b)).map(([a, b, w]) => [local.get(a)!, local.get(b)!, w]),
+      );
+      if (!sub.size) continue;
+      const parts: Record<string, number> = louvain(sub, { resolution: 1 + round * 0.5, getEdgeWeight: 'weight', rng });
+      const ids = new Set(Object.values(parts));
+      if (ids.size < 2) continue;
+      const remap = new Map<number, number>();
+      for (const p of ids) remap.set(p, nextId++);
+      idx.forEach((g, k) => (cluster[g] = remap.get(parts[k])!));
+      split = true;
+    }
+    if (!split) break;
+  }
+
+  // Fragmentos pequeños: se funden con la constelación vecina más conectada
+  // (sin dejar que ésta vuelva a crecer demasiado). Una pasada por las aristas por ronda.
+  const minSize = Math.max(8, Math.round(n * 0.007));
+  for (let pass = 0; pass < 8; pass++) {
     const size = new Map<number, number>();
     for (const c of cluster) size.set(c, (size.get(c) ?? 0) + 1);
-    let changed = false;
-    for (const [c, s] of size) {
-      if (s >= minSize) continue;
-      // peso hacia otras constelaciones
-      const toward = new Map<number, number>();
-      for (const [a, b, w] of edges) {
-        if (cluster[a] === c && cluster[b] !== c) toward.set(cluster[b], (toward.get(cluster[b]) ?? 0) + w);
-        else if (cluster[b] === c && cluster[a] !== c) toward.set(cluster[a], (toward.get(cluster[a]) ?? 0) + w);
-      }
+    const toward = new Map<number, Map<number, number>>();
+    const addW = (from: number, to: number, w: number) => {
+      if ((size.get(from) ?? 0) >= minSize) return;
+      if (!toward.has(from)) toward.set(from, new Map());
+      const m = toward.get(from)!;
+      m.set(to, (m.get(to) ?? 0) + w);
+    };
+    for (const [a, b, w] of edges) {
+      const ca = cluster[a];
+      const cb = cluster[b];
+      if (ca === cb) continue;
+      addW(ca, cb, w);
+      addW(cb, ca, w);
+    }
+    const target = new Map<number, number>();
+    // de menor a mayor, para que los fragmentos se agrupen antes de crecer
+    const small = [...toward.keys()].sort((x, y) => size.get(x)! - size.get(y)!);
+    for (const c of small) {
+      if (target.has(c)) continue;
       let best = -1;
-      let bestW = 0;
-      for (const [k, w] of toward) if (w > bestW) (best = k), (bestW = w);
+      let bestScore = 0;
+      for (const [k, w] of toward.get(c)!) {
+        const dest = target.get(k) ?? k;
+        if (dest === c) continue;
+        const sz = size.get(dest) ?? 1;
+        const score = (w / Math.sqrt(sz)) * (sz + size.get(c)! > maxSize * 1.3 ? 0.2 : 1);
+        if (score > bestScore) (best = dest), (bestScore = score);
+      }
       if (best >= 0) {
-        for (let i = 0; i < n; i++) if (cluster[i] === c) cluster[i] = best;
-        changed = true;
+        target.set(c, best);
+        size.set(best, (size.get(best) ?? 0) + size.get(c)!);
       }
     }
-    if (!changed) break;
+    if (!target.size) break;
+    for (let i = 0; i < n; i++) {
+      let c = cluster[i];
+      for (let hop = 0; hop < 10 && target.has(c); hop++) c = target.get(c)!;
+      cluster[i] = c;
+    }
   }
 
   // Las diminutas sin ninguna conexión se agrupan en una sola constelación «miscelánea»

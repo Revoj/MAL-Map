@@ -122,7 +122,10 @@ export function describeConstellations(
       [p[0], p[3]],
       [p[0]],
     ].filter((o) => o.every(Boolean)).map((o) => o.join(' · '));
-    c.name = options.find((o) => !used.has(o)) ?? (p[0] ? `${p[0]} · ${c.hint}` : c.hint);
+    // título corto para nombres de respaldo: hasta los dos puntos y ~22 caracteres
+    let short = c.hint.split(/[:：]/)[0].trim();
+    if (short.length > 22) short = short.slice(0, 21).replace(/\s+\S*$/, '') + '…';
+    c.name = options.find((o) => !used.has(o)) ?? (p[0] ? `${p[0]} · ${short}` : short);
     used.add(c.name);
     delete (c as any).candidates;
   }
