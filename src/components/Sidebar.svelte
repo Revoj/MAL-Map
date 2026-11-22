@@ -88,6 +88,8 @@
       bottom: 0;
       left: 0;
       width: min(360px, 92vw);
+      background: #0a0c1c;
+      box-shadow: 8px 0 24px rgba(0, 0, 0, 0.5);
     }
   }
 </style>

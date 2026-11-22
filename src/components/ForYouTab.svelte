@@ -124,7 +124,7 @@
   {#each recs.slice(0, shown) as r (r.i)}
     <AnimeRow i={r.i}>
       {#snippet extra()}
-        <span class="match"><span class="bar" style="width:{r.score}%"></span><small>{r.score}% afinidad</small></span>
+        <span class="match"><span class="track"><span class="bar" style="width:{r.score}%"></span></span><small>{r.score}% afinidad</small></span>
         {#if r.because.length}
           <small class="because faint">Porque viste {r.because.map((j) => app.title(j)).join(', ')}</small>
         {/if}
@@ -229,25 +229,31 @@
     margin: 6px 0 8px;
   }
   .match {
-    position: relative;
-    height: 16px;
     display: flex;
     align-items: center;
+    gap: 8px;
+    margin: 2px 0;
   }
-  .match .bar {
-    position: absolute;
-    left: 0;
-    top: 6px;
+  .match .track {
+    flex: 1;
     height: 4px;
     border-radius: 2px;
+    background: rgba(255, 255, 255, 0.07);
+    overflow: hidden;
+  }
+  .match .bar {
+    display: block;
+    height: 100%;
+    border-radius: 2px;
     background: linear-gradient(90deg, var(--accent), var(--accent-2));
-    opacity: 0.6;
   }
   .match small {
-    position: relative;
-    margin-left: auto;
+    flex: none;
     font-size: 11px;
+    font-weight: 600;
     color: var(--accent-2);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
   }
   .because,
   .pending,

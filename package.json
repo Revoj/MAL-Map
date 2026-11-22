@@ -18,6 +18,7 @@
     "node": ">=22.18"
   },
   "dependencies": {
+    "@sigma/node-image": "^3.0.0",
     "d3-force": "^3.0.1",
     "graphology": "^0.26.0",
     "graphology-communities-louvain": "^2.0.2",

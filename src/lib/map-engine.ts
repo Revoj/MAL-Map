@@ -1,5 +1,6 @@
 import Graph from 'graphology';
 import Sigma from 'sigma';
+import { createNodeImageProgram } from '@sigma/node-image';
 import type { Constellation } from './core/types.ts';
 import type { Store } from './data.ts';
 
@@ -23,7 +24,8 @@ export function hsl(h: number, s: number, l: number, a = 1): string {
 }
 
 const FADED_NODE = '#262c4a';
-const FADED_EDGE = 'rgba(0,0,0,0)';
+/** Por debajo de este ratio de cámara (más zoom) se muestran las portadas */
+const IMAGE_RATIO = 0.22;
 
 /**
  * Envuelve Sigma: grafo fijo con todos los nodos; los filtros solo cambian
@@ -43,6 +45,8 @@ export class MapEngine {
   private dimHidden = false;
   private neighborSet = new Set<number>();
   private tween = 0;
+  private imageMode = false;
+  private imageTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(
     private container: HTMLElement,
@@ -76,6 +80,16 @@ export class MapEngine {
       hideEdgesOnMove: false,
       stagePadding: 40,
       defaultDrawNodeHover: drawHover,
+      nodeProgramClasses: {
+        image: createNodeImageProgram({
+          size: { mode: 'force', value: 128 },
+          objectFit: 'cover',
+          crossOrigin: 'anonymous',
+          drawingMode: 'background',
+          padding: 0.06,
+          drawHover,
+        }),
+      },
       nodeReducer: (node, data) => this.reduceNode(Number(node), data),
       edgeReducer: (edge, data) => this.reduceEdge(edge, data),
     });
@@ -85,29 +99,47 @@ export class MapEngine {
     this.sigma.on('clickStage', () => cb.click(null));
     this.sigma.on('enterNode', ({ node }) => {
       this.hovered = Number(node);
-      this.updateNeighbors();
       container.style.cursor = 'pointer';
       cb.hover(this.hovered);
       this.sigma.refresh({ skipIndexation: true });
     });
     this.sigma.on('leaveNode', () => {
       this.hovered = null;
-      this.updateNeighbors();
       container.style.cursor = '';
       cb.hover(null);
       this.sigma.refresh({ skipIndexation: true });
     });
     this.sigma.on('afterRender', () => this.drawOverlay());
-    this.sigma.getCamera().on('updated', () => this.drawOverlay());
+    this.sigma.getCamera().on('updated', (state) => {
+      this.drawOverlay();
+      // modo portada: al acercarse se vuelven a evaluar los nodos visibles (con retardo)
+      const want = state.ratio < IMAGE_RATIO;
+      if (want || want !== this.imageMode) {
+        clearTimeout(this.imageTimer);
+        this.imageTimer = setTimeout(() => {
+          this.imageMode = want;
+          this.sigma.refresh({ skipIndexation: true });
+        }, 150);
+      }
+    });
     new ResizeObserver(() => this.drawOverlay()).observe(container);
   }
 
+  /** Vecinos del nodo seleccionado (el hover NO atenúa nada, para evitar parpadeos) */
   private updateNeighbors() {
     this.neighborSet.clear();
-    const c = this.hovered ?? this.selected;
+    const c = this.selected;
     if (c == null) return;
     this.neighborSet.add(c);
     for (const [j] of this.store.adj[c]) if (this.visible[j]) this.neighborSet.add(j);
+  }
+
+  /** ¿Está el nodo dentro de la pantalla (con margen)? */
+  private onScreen(x: number, y: number) {
+    const p = this.sigma.graphToViewport({ x, y });
+    const { width, height } = this.sigma.getDimensions();
+    const m = 120;
+    return p.x > -m && p.y > -m && p.x < width + m && p.y < height + m;
   }
 
   private reduceNode(i: number, data: any) {
@@ -117,32 +149,46 @@ export class MapEngine {
       if (!this.dimHidden) return { ...out, hidden: true };
       return { ...out, color: FADED_NODE, label: '', size: Math.max(1, (st?.size ?? 2) * 0.6), zIndex: 0 };
     }
+    let faded = !!st?.faded;
+    let focusFaded = false; // atenuado por selección/foco (sin portada)
     if (st) {
-      out.color = st.faded ? FADED_NODE : st.color;
+      out.color = st.color;
       out.size = st.size;
       out.label = st.label;
       out.zIndex = st.emphasis ? 2 : 1;
       if (st.emphasis) out.forceLabel = true;
     }
-    const focus = this.hovered ?? this.selected;
-    if (focus != null) {
+    const sel = this.selected;
+    if (sel != null) {
       if (this.neighborSet.has(i)) {
+        faded = false;
         out.zIndex = 3;
         out.forceLabel = true;
-        if (st?.faded) out.color = st.color;
       } else {
-        out.color = FADED_NODE;
-        out.label = '';
+        faded = focusFaded = true;
         out.forceLabel = false;
       }
-      if (i === focus) {
+      if (i === sel) {
         out.highlighted = true;
-        out.size = out.size * 1.4;
+        out.size *= 1.4;
       }
-    } else if (this.focusSet && !this.focusSet.has(i)) {
+    } else if (this.focusSet && !this.focusSet.has(i)) faded = focusFaded = true;
+    if (faded) {
       out.color = FADED_NODE;
       out.label = '';
       out.forceLabel = false;
+    }
+    // portadas dentro de las estrellas al acercarse
+    if (this.imageMode && !focusFaded && this.onScreen(data.x, data.y)) {
+      out.type = 'image';
+      out.image = this.store.nodes[i].img;
+      out.size *= 1.5;
+      out.label = st?.label ?? out.label;
+    }
+    if (i === this.hovered) {
+      out.highlighted = true;
+      out.zIndex = 4;
+      out.size *= 1.25;
     }
     return out;
   }
@@ -150,13 +196,18 @@ export class MapEngine {
   private reduceEdge(edge: string, data: any) {
     const [a, b] = this.graph.extremities(edge).map(Number);
     if (!this.visible[a] || !this.visible[b]) return { ...data, hidden: true };
-    const focus = this.hovered ?? this.selected;
-    if (focus != null) {
-      if (a === focus || b === focus) {
-        const other = a === focus ? b : a;
+    const sel = this.selected;
+    if (sel != null) {
+      if (a === sel || b === sel) {
+        const other = a === sel ? b : a;
         return { ...data, color: this.styles[other]?.color ?? '#fff', size: 0.8 + data.weight * 6, zIndex: 2 };
       }
-      return { ...data, color: FADED_EDGE, hidden: true };
+      if (a !== this.hovered && b !== this.hovered) return { ...data, hidden: true };
+    }
+    const h = this.hovered;
+    if (h != null && (a === h || b === h)) {
+      // hover: solo se resaltan sus conexiones, sin apagar el resto
+      return { ...data, color: 'rgba(255,255,255,0.55)', size: 0.6 + data.weight * 4, zIndex: 3 };
     }
     if (this.focusSet && !(this.focusSet.has(a) && this.focusSet.has(b))) return { ...data, hidden: true };
     const sa = this.styles[a];
@@ -296,7 +347,7 @@ export class MapEngine {
     ctx.globalCompositeOperation = 'lighter';
     const ratio = this.sigma.getCamera().ratio;
     const html: string[] = [];
-    const dimmed = this.hovered != null || this.selected != null || this.focusSet != null;
+    const dimmed = this.selected != null || this.focusSet != null;
     const placed: [number, number, number, number][] = [];
     const sorted = [...this.constellations].sort((a, b) => b.size - a.size);
     for (const c of sorted) {
@@ -337,6 +388,7 @@ export class MapEngine {
 
   destroy() {
     cancelAnimationFrame(this.tween);
+    clearTimeout(this.imageTimer);
     this.sigma.kill();
     this.bg.remove();
     this.labels.remove();

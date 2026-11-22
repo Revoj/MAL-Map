@@ -7,7 +7,7 @@
   import Legend from './components/Legend.svelte';
 
   app.init();
-  let sidebarOpen = $state(true);
+  let sidebarOpen = $state(window.innerWidth > 820);
 </script>
 
 {#if app.error}
@@ -139,7 +139,8 @@
       var(--bg);
   }
   @media (max-width: 820px) {
-    .layout {
+    .layout,
+    .layout.collapsed {
       grid-template-columns: 1fr;
       grid-template-areas: 'top' 'map';
     }
